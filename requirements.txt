@@ -5,3 +5,5 @@ pandas
 python-dotenv
 azure-storage-blob
 pdfplumber
+openpyxl
+streamlit-extras

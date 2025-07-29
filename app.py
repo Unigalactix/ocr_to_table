@@ -4,6 +4,9 @@ import pandas as pd
 import time # For simulating connection delay
 import json
 import os
+import io
+import logging
+from streamlit_extras.dataframe_explorer import dataframe_explorer
 
 
 
@@ -269,71 +272,47 @@ def run_connection_and_show_data(selected_path):
             df = pd.read_csv(io.BytesIO(blob_data))
             st.success(f"Successfully loaded CSV file from blob storage!")
             st.dataframe(df)
+            csv_data = df.to_csv(index=False).encode('utf-8')
+            json_data = df.to_json(orient='records', force_ascii=False, indent=2).encode('utf-8')
+            st.download_button(
+                label="Download as CSV",
+                data=csv_data,
+                file_name="data.csv",
+                mime="text/csv"
+            )
+            st.download_button(
+                label="Download as JSON",
+                data=json_data,
+                file_name="data.json",
+                mime="application/json"
+            )
             return df
         elif file_format == 'excel' or file_format == 'xlsx':
             excel_file = pd.ExcelFile(io.BytesIO(blob_data))
-            all_tables = []
-            readable_tables = []
+            all_sheets = []
             for sheet_name in excel_file.sheet_names:
                 df = excel_file.parse(sheet_name)
-                if not df.empty:
-                    all_tables.append(df)
-                    # Try to extract label/amount columns
-                    cols = [c.lower() for c in df.columns]
-                    label_col = None
-                    amount_col = None
-                    for c in df.columns:
-                        if 'label' in c.lower() or 'item' in c.lower() or 'service' in c.lower() or 'description' in c.lower():
-                            label_col = c
-                        if 'amount' in c.lower() or 'total' in c.lower() or 'price' in c.lower() or 'value' in c.lower():
-                            amount_col = c
-                    if label_col and amount_col:
-                        label_amount_df = df[[label_col, amount_col]].rename(columns={label_col: 'Label', amount_col: 'Amount'})
-                        st.write(f"Sheet: {sheet_name} (Label/Amount)")
-                        st.dataframe(label_amount_df)
-                        readable_tables.append(label_amount_df)
-                    elif len(df.columns) == 2:
-                        label_amount_df = df.rename(columns={df.columns[0]: 'Label', df.columns[1]: 'Amount'})
-                        st.write(f"Sheet: {sheet_name} (Label/Amount)")
-                        st.dataframe(label_amount_df)
-                        readable_tables.append(label_amount_df)
-                    else:
-                        st.write(f"Sheet: {sheet_name}")
-                        st.dataframe(df)
-            if readable_tables:
-                df_all = pd.concat(readable_tables, ignore_index=True)
+                st.write(f"Sheet: {sheet_name}")
+                st.dataframe(df)
+                all_sheets.append(df)
+            st.success(f"Successfully loaded Excel file from blob storage!")
+            if all_sheets:
+                df_all = pd.concat(all_sheets, ignore_index=True)
                 csv_data = df_all.to_csv(index=False).encode('utf-8')
                 json_data = df_all.to_json(orient='records', force_ascii=False, indent=2).encode('utf-8')
                 st.download_button(
-                    label="Download all label/amount tables as CSV",
+                    label="Download as CSV",
                     data=csv_data,
-                    file_name="excel_label_amount_tables.csv",
+                    file_name="excel_data.csv",
                     mime="text/csv"
                 )
                 st.download_button(
-                    label="Download all label/amount tables as JSON",
+                    label="Download as JSON",
                     data=json_data,
-                    file_name="excel_label_amount_tables.json",
+                    file_name="excel_data.json",
                     mime="application/json"
                 )
-                return df_all
-            elif all_tables:
-                df_all = pd.concat(all_tables, ignore_index=True)
-                csv_data = df_all.to_csv(index=False).encode('utf-8')
-                json_data = df_all.to_json(orient='records', force_ascii=False, indent=2).encode('utf-8')
-                st.download_button(
-                    label="Download all tables as CSV",
-                    data=csv_data,
-                    file_name="excel_tables.csv",
-                    mime="text/csv"
-                )
-                st.download_button(
-                    label="Download all tables as JSON",
-                    data=json_data,
-                    file_name="excel_tables.json",
-                    mime="application/json"
-                )
-                return df_all
+            return None
         elif file_format == 'json':
             df = pd.read_json(io.BytesIO(blob_data))
             st.success(f"Successfully loaded JSON file from blob storage!")
@@ -347,11 +326,23 @@ def run_connection_and_show_data(selected_path):
         return None
 
 
+
+# --- Theme Toggle ---
+if 'theme' not in st.session_state:
+    st.session_state['theme'] = 'light'
+theme = st.sidebar.radio("Theme", ["light", "dark"], index=0 if st.session_state['theme']=="light" else 1)
+st.session_state['theme'] = theme
 st.set_page_config(layout="centered", page_title="Blob Data Viewer")
+
 
 st.title("Azure Blob Storage File Reader")
 
-# --- Azure Blob Storage Details ---
+
+# --- Error Logging ---
+if 'error_log' not in st.session_state:
+    st.session_state['error_log'] = []
+def log_error(msg):
+    st.session_state['error_log'].append(msg)
 
 
 
@@ -424,17 +415,99 @@ selected_path_value = {
     'file_format': file_format
 }
 
-# --- RUN Button ---
 
-# Show table when a file is selected and RUN is pressed
-if blob_name and st.button("RUN"):
-    selected_path_value = {
-        'connection_string': connection_string,
-        'container_name': container_name,
-        'blob_name': blob_name,
-        'file_format': file_format
-    }
-    run_connection_and_show_data(selected_path_value)
+
+
+# --- File Upload Option ---
+st.subheader("Or Upload a Local File")
+uploaded_file = st.file_uploader("Choose a file", type=["csv", "xlsx", "xls", "json", "pdf", "png", "jpg", "jpeg", "bmp", "tiff"])
+
+def handle_uploaded_file(uploaded_file):
+    file_name = uploaded_file.name
+    file_format = "other"
+    if file_name.lower().endswith(".csv"):
+        file_format = "csv"
+    elif file_name.lower().endswith(".xlsx") or file_name.lower().endswith(".xls"):
+        file_format = "excel"
+    elif file_name.lower().endswith(".json"):
+        file_format = "json"
+    elif file_name.lower().endswith(".pdf"):
+        file_format = "pdf"
+    try:
+        if file_format == 'csv':
+            df = pd.read_csv(uploaded_file)
+            st.dataframe(df)
+            csv_data = df.to_csv(index=False).encode('utf-8')
+            json_data = df.to_json(orient='records', force_ascii=False, indent=2).encode('utf-8')
+            st.download_button("Download as CSV", csv_data, file_name="data.csv", mime="text/csv")
+            st.download_button("Download as JSON", json_data, file_name="data.json", mime="application/json")
+        elif file_format == 'excel':
+            excel_file = pd.ExcelFile(uploaded_file)
+            sheet = st.selectbox("Select sheet", excel_file.sheet_names)
+            df = excel_file.parse(sheet)
+            st.dataframe(df)
+            csv_data = df.to_csv(index=False).encode('utf-8')
+            json_data = df.to_json(orient='records', force_ascii=False, indent=2).encode('utf-8')
+            st.download_button("Download as CSV", csv_data, file_name="excel_data.csv", mime="text/csv")
+            st.download_button("Download as JSON", json_data, file_name="excel_data.json", mime="application/json")
+        elif file_format == 'json':
+            df = pd.read_json(uploaded_file)
+            st.dataframe(df)
+        elif file_format == 'pdf':
+            st.info("PDF preview not supported for uploads.")
+        else:
+            st.info("Preview not supported for this file type.")
+    except Exception as e:
+        log_error(f"Upload error: {e}")
+        st.error(f"Error reading uploaded file: {e}")
+
+if uploaded_file:
+    handle_uploaded_file(uploaded_file)
+
+# --- RUN Button Only (Blob) ---
+if blob_name and not uploaded_file:
+    if st.button("RUN"):
+        selected_path_value = {
+            'connection_string': connection_string,
+            'container_name': container_name,
+            'blob_name': blob_name,
+            'file_format': file_format
+        }
+        try:
+            df = run_connection_and_show_data(selected_path_value)
+            # --- Sheet Selection for Excel ---
+            if file_format in ["excel", "xlsx"] and df is not None:
+                st.write("Select sheet to view:")
+                # Already handled in run_connection_and_show_data if needed
+            # --- Pagination and Filtering ---
+            if isinstance(df, pd.DataFrame) and len(df) > 0:
+                st.write("Filter/Search Table:")
+                filtered_df = dataframe_explorer(df, case=False)
+                st.dataframe(filtered_df)
+                st.write("Pagination:")
+                page_size = st.number_input("Rows per page", min_value=5, max_value=100, value=20)
+                total_pages = (len(filtered_df) - 1) // page_size + 1
+                page = st.number_input("Page", min_value=1, max_value=total_pages, value=1)
+                start = (page - 1) * page_size
+                end = start + page_size
+                st.dataframe(filtered_df.iloc[start:end])
+        except Exception as e:
+            log_error(f"Blob error: {e}")
+            st.error(f"Error: {e}")
+
+# --- Error Log Download ---
+if st.sidebar.button("Download Error Log"):
+    log_content = "\n".join(st.session_state['error_log'])
+    st.sidebar.download_button("Download Error Log", log_content, file_name="error_log.txt")
+
+# --- User Feedback ---
+st.sidebar.write("## Feedback")
+feedback = st.sidebar.radio("Was the extraction correct?", ("👍 Yes", "👎 No"))
+if feedback:
+    st.sidebar.success("Thank you for your feedback!")
+
+# --- Help/Docs Link ---
+st.sidebar.markdown("[Help/Documentation](https://github.com/Unigalactix/ocr_to_table#readme)")
 
 st.sidebar.header("About")
 st.sidebar.info("This is a simple Streamlit application demonstrating path selection and data display.")

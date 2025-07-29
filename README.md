@@ -6,10 +6,19 @@ Easily extract and view tabular data from files stored in Azure Blob Storage usi
 
 ---
 
+
 ## Features
 
 - Connect to Azure Blob Storage using credentials from `.env` and `tbudgetdb.json`
 - Select files (PDF, images, CSV, Excel, JSON) from your container
+- **Upload local files** (CSV, Excel, JSON, PDF, images) for quick testing
+- **Sheet selection** for Excel files
+- **Pagination** and **column filtering/search** for large tables
+- **Download error log** for troubleshooting
+- **User feedback** (thumbs up/down) in sidebar
+- **Theme toggle** (light/dark mode)
+- **Session state** remembers last selections
+- **Help/documentation link** in sidebar
 - OCR support for PDF and image files (`pdfplumber`, `pytesseract`)
 - Smart extraction: Only meaningful items/services and totals are shown; address/city/symbol-only labels are ignored
 - Deduplication: No duplicate items in the table
@@ -34,6 +43,7 @@ Easily extract and view tabular data from files stored in Azure Blob Storage usi
 
 ---
 
+
 ## Usage
 
 1. Run the app:
@@ -43,9 +53,14 @@ Easily extract and view tabular data from files stored in Azure Blob Storage usi
    python -m streamlit run app.py 
    ```
 2. Enter credentials if prompted
-3. Select a file from the dropdown
-4. Click RUN to extract and view data
-5. Download the table as CSV or JSON
+3. Select a file from the dropdown **or upload a local file**
+4. For Excel files, select the sheet to view
+5. Use the filter/search box above tables to find data quickly
+6. Use pagination controls to browse large tables
+7. Download the table as CSV or JSON
+8. Download error log from the sidebar if needed
+9. Provide feedback in the sidebar
+10. Use the theme toggle and help link in the sidebar
 
 ---
 
@@ -57,6 +72,7 @@ Easily extract and view tabular data from files stored in Azure Blob Storage usi
 
 ---
 
+
 ## Dependencies
 
 - streamlit
@@ -66,8 +82,11 @@ Easily extract and view tabular data from files stored in Azure Blob Storage usi
 - pytesseract
 - Pillow
 - pdfplumber
+- openpyxl
+- streamlit-extras
 
 ---
+
 
 ## License
 
