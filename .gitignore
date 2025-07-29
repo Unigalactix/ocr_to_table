@@ -1,51 +1,26 @@
-# Ignore environment variable files
+# Environment variable files
 .env
 .env.*
+*.env
+
 # Python
 __pycache__/
-*.py[cod]
+*.pyc
 *.pyo
-*.pyd
-*.so
-*.egg
 *.egg-info/
 dist/
 build/
 
-# Jupyter
-.ipynb_checkpoints
-
 # VS Code
 .vscode/
 
-# Environment
-.env
-*.env
+# Streamlit
+.streamlit/
 
-# OS
+# Ignore system files
 .DS_Store
 Thumbs.db
 
 # Azure/Secrets
 *.json
 !tbudgetdb.json
-
-# Streamlit
-.streamlit/
-
-# Logs
-*.log
-
-# Ignore large files
-*.bak
-*.tmp
-
-# Ignore test output
-htmlcov/
-coverage.xml
-
-# Ignore package management
-pip-wheel-metadata/
-
-# Ignore node modules (if any)
-node_modules/

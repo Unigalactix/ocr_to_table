@@ -34,9 +34,8 @@ def run_connection_and_show_data(selected_path):
     """
     from azure.storage.blob import BlobServiceClient
     import io
-    st.write(f"Attempting to connect to: **{selected_path}**...")
-    time.sleep(1)
-    st.info("Connecting to Azure Blob Storage...")
+    with st.spinner('Connecting to Azure Blob Storage... 💸'):
+        time.sleep(1)
     try:
         blob_service_client = BlobServiceClient.from_connection_string(selected_path['connection_string'])
         blob_client = blob_service_client.get_blob_client(container=selected_path['container_name'], blob=selected_path['blob_name'])
@@ -49,82 +48,150 @@ def run_connection_and_show_data(selected_path):
         import pdfplumber
         import re
         ocr_text = None
-        # PDF OCR logic
+        # PDF logic: extract tables as-is, then OCR for summary if needed
         if file_format == 'pdf' or selected_path['blob_name'].lower().endswith('.pdf'):
+            import numpy as np
             with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_pdf:
                 tmp_pdf.write(blob_data)
                 tmp_pdf.flush()
                 with pdfplumber.open(tmp_pdf.name) as pdf:
-                    text = "\n".join(page.extract_text() or "" for page in pdf.pages)
-                    ocr_text = text
-            # Extract label-value pairs for summary amounts
-            summary_pattern = r"(?i)(total|subtotal|budget|[A-Za-z0-9 \-]+)\s*[:\-]?\s*\$?([\d,]+(?:\.\d{2})?)"
-            summary_matches = re.findall(summary_pattern, ocr_text)
-            # Build single table with all found items/services and summary labels
-            table_rows = []
-            label_count = {}
-            subtotal_row = None
-            total_row = None
-            address_keywords = ["pin", "house", "street", "road", "avenue", "block", "no", "number", "zip", "postal", "address"]
-            city_names = [
-                "new york", "los angeles", "chicago", "houston", "phoenix", "philadelphia", "san antonio", "san diego", "dallas", "san jose", "austin", "jacksonville", "fort worth", "columbus", "charlotte", "san francisco", "indianapolis", "seattle", "denver", "washington", "boston", "el paso", "nashville", "detroit", "oklahoma city", "portland", "las vegas", "memphis", "louisville", "baltimore", "milwaukee", "albuquerque", "tucson", "fresno", "sacramento", "kansas city", "long beach", "mesa", "atlanta", "colorado springs", "virginia beach", "raleigh", "omaha", "miami", "oakland", "minneapolis", "tulsa", "wichita", "new orleans", "arlington"
-            ]
-            for label, amount in summary_matches:
-                label_clean = label.strip()
-                # Ignore labels that are only numbers
-                if label_clean.isdigit():
-                    continue
-                # Ignore labels that are only symbols or punctuation
-                if all(c in ",.:-_()[]{}|/\\'\"!@#$%^&*" for c in label_clean):
-                    continue
-                # Ignore amounts that are only punctuation/symbols
-                if all(c in ",.:-_()[]{}|/\\'\"!@#$%^&*" for c in amount.strip()):
-                    continue
-                # Ignore labels that are only city names (case-insensitive, no description)
-                label_key = label_clean.lower()
-                if any(addr in label_key for addr in address_keywords):
-                    continue
-                if label_key in city_names:
-                    continue
-                if label_key in label_count:
-                    label_count[label_key] += 1
-                    label_display = f"{label_clean}_x{label_count[label_key]}"
-                else:
-                    label_count[label_key] = 1
-                    label_display = label_clean
-                if label_key in ["subtotal"]:
-                    subtotal_row = {"Label": "Subtotal", "Amount": amount}
-                elif label_key in ["total", "amount", "total amount", "grand total"]:
-                    total_row = {"Label": "Total", "Amount": amount}
-                else:
-                    table_rows.append({"Label": label_display, "Amount": amount})
-            # Remove duplicates by label and amount
-            seen = set()
-            unique_rows = []
-            for row in table_rows:
-                key = (row["Label"].lower(), row["Amount"])
-                if key not in seen:
-                    unique_rows.append(row)
-                    seen.add(key)
-            # Always show subtotal and total at the bottom
-            if subtotal_row:
-                unique_rows.append(subtotal_row)
-            if total_row:
-                unique_rows.append(total_row)
-            if unique_rows:
-                df = pd.DataFrame(unique_rows)
-                st.success("Extracted items/services and amounts from PDF!")
-                st.dataframe(df)
-                # Show total amount summary below table if present
-                if total_row:
-                    st.markdown(f"**Total Amount:** {total_row['Amount']}")
-                return df
-            else:
-                st.warning("No items/services or amounts found in PDF.")
-                possible_labels = ["Item/Service", "Subtotal", "Total"]
-                df = pd.DataFrame({"Label": possible_labels, "Amount": ["-"]*len(possible_labels)})
-                st.dataframe(df)
-                return df
+                    all_tables = []
+                    for page in pdf.pages:
+                        tables = page.extract_tables()
+                        for table in tables:
+                            # Convert to DataFrame and append if not empty
+                            df_table = pd.DataFrame(table[1:], columns=table[0]) if len(table) > 1 else pd.DataFrame(table)
+                            if not df_table.empty:
+                                all_tables.append(df_table)
+                    if all_tables:
+                        def get_label_amount_table(df):
+                            cols = [c.lower() for c in df.columns]
+                            label_col = None
+                            amount_col = None
+                            for c in df.columns:
+                                if 'label' in c.lower() or 'item' in c.lower() or 'service' in c.lower() or 'description' in c.lower():
+                                    label_col = c
+                                if 'amount' in c.lower() or 'total' in c.lower() or 'price' in c.lower() or 'value' in c.lower():
+                                    amount_col = c
+                            if label_col and amount_col:
+                                return df[[label_col, amount_col]].rename(columns={label_col: 'Label', amount_col: 'Amount'})
+                            if len(df.columns) == 2:
+                                return df.rename(columns={df.columns[0]: 'Label', df.columns[1]: 'Amount'})
+                            return None
+                        readable_tables = []
+                        extracted_tables = []
+                        for i, df_table in enumerate(all_tables):
+                            label_amount_df = get_label_amount_table(df_table)
+                            if label_amount_df is not None:
+                                readable_tables.append(label_amount_df)
+                                extracted_tables.append((f"Table {i+1} (Label/Amount)", label_amount_df))
+                            else:
+                                extracted_tables.append((f"Table {i+1}", df_table))
+                        # Only show the final generated table and download buttons (hide extracted tables and button)
+                        if readable_tables:
+                            df_all = pd.concat(readable_tables, ignore_index=True)
+                            csv_data = df_all.to_csv(index=False).encode('utf-8')
+                            json_data = df_all.to_json(orient='records', force_ascii=False, indent=2).encode('utf-8')
+                            st.success("Extracted tables from PDF!")
+                            st.subheader("Generated Data Table")
+                            st.dataframe(df_all)
+                            st.download_button(
+                                label="Download table as CSV",
+                                data=csv_data,
+                                file_name="pdf_label_amount_tables.csv",
+                                mime="text/csv"
+                            )
+                            st.download_button(
+                                label="Download table as JSON",
+                                data=json_data,
+                                file_name="pdf_label_amount_tables.json",
+                                mime="application/json"
+                            )
+                            return df_all
+                        else:
+                            df_all = pd.concat(all_tables, ignore_index=True)
+                            csv_data = df_all.to_csv(index=False).encode('utf-8')
+                            json_data = df_all.to_json(orient='records', force_ascii=False, indent=2).encode('utf-8')
+                            st.success("Extracted tables from PDF!")
+                            st.subheader("Generated Data Table")
+                            st.dataframe(df_all)
+                            st.download_button(
+                                label="Download table as CSV",
+                                data=csv_data,
+                                file_name="pdf_tables.csv",
+                                mime="text/csv"
+                            )
+                            st.download_button(
+                                label="Download table as JSON",
+                                data=json_data,
+                                file_name="pdf_tables.json",
+                                mime="application/json"
+                            )
+                            return df_all
+                    # If no tables found, fallback to OCR summary extraction
+                    if not all_tables:
+                        text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+                        ocr_text = text
+                        # OCR summary extraction as before
+                        summary_pattern = r"(?i)(total|subtotal|budget|[A-Za-z0-9 \-]+)\s*[:\-]?\s*\$?([\d,]+(?:\.\d{2})?)"
+                        summary_matches = re.findall(summary_pattern, ocr_text)
+                        table_rows = []
+                        label_count = {}
+                        subtotal_row = None
+                        total_row = None
+                        address_keywords = ["pin", "house", "street", "road", "avenue", "block", "no", "number", "zip", "postal", "address"]
+                        city_names = [
+                            "new york", "los angeles", "chicago", "houston", "phoenix", "philadelphia", "san antonio", "san diego", "dallas", "san jose", "austin", "jacksonville", "fort worth", "columbus", "charlotte", "san francisco", "indianapolis", "seattle", "denver", "washington", "boston", "el paso", "nashville", "detroit", "oklahoma city", "portland", "las vegas", "memphis", "louisville", "baltimore", "milwaukee", "albuquerque", "tucson", "fresno", "sacramento", "kansas city", "long beach", "mesa", "atlanta", "colorado springs", "virginia beach", "raleigh", "omaha", "miami", "oakland", "minneapolis", "tulsa", "wichita", "new orleans", "arlington"
+                        ]
+                        for label, amount in summary_matches:
+                            label_clean = label.strip()
+                            if label_clean.isdigit():
+                                continue
+                            if all(c in ",.:-_()[]{}|/\\'\"!@#$%^&*" for c in label_clean):
+                                continue
+                            if all(c in ",.:-_()[]{}|/\\'\"!@#$%^&*" for c in amount.strip()):
+                                continue
+                            label_key = label_clean.lower()
+                            if any(addr in label_key for addr in address_keywords):
+                                continue
+                            if label_key in city_names:
+                                continue
+                            if label_key in label_count:
+                                label_count[label_key] += 1
+                                label_display = f"{label_clean}_x{label_count[label_key]}"
+                            else:
+                                label_count[label_key] = 1
+                                label_display = label_clean
+                            if label_key in ["subtotal"]:
+                                subtotal_row = {"Label": "Subtotal", "Amount": amount}
+                            elif label_key in ["total", "amount", "total amount", "grand total"]:
+                                total_row = {"Label": "Total", "Amount": amount}
+                            else:
+                                table_rows.append({"Label": label_display, "Amount": amount})
+                        seen = set()
+                        unique_rows = []
+                        for row in table_rows:
+                            key = (row["Label"].lower(), row["Amount"])
+                            if key not in seen:
+                                unique_rows.append(row)
+                                seen.add(key)
+                        if subtotal_row:
+                            unique_rows.append(subtotal_row)
+                        if total_row:
+                            unique_rows.append(total_row)
+                        if unique_rows:
+                            df = pd.DataFrame(unique_rows)
+                            st.success("Extracted items/services and amounts from PDF (OCR)!")
+                            st.dataframe(df)
+                            if total_row:
+                                st.markdown(f"**Total Amount:** {total_row['Amount']}")
+                            return df
+                        else:
+                            st.warning("No items/services or amounts found in PDF.")
+                            possible_labels = ["Item/Service", "Subtotal", "Total"]
+                            df = pd.DataFrame({"Label": possible_labels, "Amount": ["-"]*len(possible_labels)})
+                            st.dataframe(df)
+                            return df
         # Try OCR if file is image or fallback for other formats
         if file_format in ['png', 'jpg', 'jpeg', 'bmp', 'tiff'] or selected_path['blob_name'].lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff')):
             with tempfile.NamedTemporaryFile(delete=False, suffix='.' + file_format) as tmp_img:
@@ -201,14 +268,76 @@ def run_connection_and_show_data(selected_path):
         if file_format == 'csv':
             df = pd.read_csv(io.BytesIO(blob_data))
             st.success(f"Successfully loaded CSV file from blob storage!")
+            st.dataframe(df)
             return df
         elif file_format == 'excel' or file_format == 'xlsx':
-            df = pd.read_excel(io.BytesIO(blob_data))
-            st.success(f"Successfully loaded Excel file from blob storage!")
-            return df
+            excel_file = pd.ExcelFile(io.BytesIO(blob_data))
+            all_tables = []
+            readable_tables = []
+            for sheet_name in excel_file.sheet_names:
+                df = excel_file.parse(sheet_name)
+                if not df.empty:
+                    all_tables.append(df)
+                    # Try to extract label/amount columns
+                    cols = [c.lower() for c in df.columns]
+                    label_col = None
+                    amount_col = None
+                    for c in df.columns:
+                        if 'label' in c.lower() or 'item' in c.lower() or 'service' in c.lower() or 'description' in c.lower():
+                            label_col = c
+                        if 'amount' in c.lower() or 'total' in c.lower() or 'price' in c.lower() or 'value' in c.lower():
+                            amount_col = c
+                    if label_col and amount_col:
+                        label_amount_df = df[[label_col, amount_col]].rename(columns={label_col: 'Label', amount_col: 'Amount'})
+                        st.write(f"Sheet: {sheet_name} (Label/Amount)")
+                        st.dataframe(label_amount_df)
+                        readable_tables.append(label_amount_df)
+                    elif len(df.columns) == 2:
+                        label_amount_df = df.rename(columns={df.columns[0]: 'Label', df.columns[1]: 'Amount'})
+                        st.write(f"Sheet: {sheet_name} (Label/Amount)")
+                        st.dataframe(label_amount_df)
+                        readable_tables.append(label_amount_df)
+                    else:
+                        st.write(f"Sheet: {sheet_name}")
+                        st.dataframe(df)
+            if readable_tables:
+                df_all = pd.concat(readable_tables, ignore_index=True)
+                csv_data = df_all.to_csv(index=False).encode('utf-8')
+                json_data = df_all.to_json(orient='records', force_ascii=False, indent=2).encode('utf-8')
+                st.download_button(
+                    label="Download all label/amount tables as CSV",
+                    data=csv_data,
+                    file_name="excel_label_amount_tables.csv",
+                    mime="text/csv"
+                )
+                st.download_button(
+                    label="Download all label/amount tables as JSON",
+                    data=json_data,
+                    file_name="excel_label_amount_tables.json",
+                    mime="application/json"
+                )
+                return df_all
+            elif all_tables:
+                df_all = pd.concat(all_tables, ignore_index=True)
+                csv_data = df_all.to_csv(index=False).encode('utf-8')
+                json_data = df_all.to_json(orient='records', force_ascii=False, indent=2).encode('utf-8')
+                st.download_button(
+                    label="Download all tables as CSV",
+                    data=csv_data,
+                    file_name="excel_tables.csv",
+                    mime="text/csv"
+                )
+                st.download_button(
+                    label="Download all tables as JSON",
+                    data=json_data,
+                    file_name="excel_tables.json",
+                    mime="application/json"
+                )
+                return df_all
         elif file_format == 'json':
             df = pd.read_json(io.BytesIO(blob_data))
             st.success(f"Successfully loaded JSON file from blob storage!")
+            st.dataframe(df)
             return df
         else:
             st.info("File format not recognized for tabular display. Downloading raw file.")
@@ -305,25 +434,7 @@ if blob_name and st.button("RUN"):
         'blob_name': blob_name,
         'file_format': file_format
     }
-    result = run_connection_and_show_data(selected_path_value)
-    if isinstance(result, pd.DataFrame):
-        st.subheader("Generated Data Table")
-        st.dataframe(result)
-        # Add download buttons for CSV and JSON
-        csv_data = result.to_csv(index=False).encode('utf-8')
-        json_data = result.to_json(orient='records', force_ascii=False, indent=2).encode('utf-8')
-        st.download_button(
-            label="Download table as CSV",
-            data=csv_data,
-            file_name="extracted_table.csv",
-            mime="text/csv"
-        )
-        st.download_button(
-            label="Download table as JSON",
-            data=json_data,
-            file_name="extracted_table.json",
-            mime="application/json"
-        )
+    run_connection_and_show_data(selected_path_value)
 
 st.sidebar.header("About")
 st.sidebar.info("This is a simple Streamlit application demonstrating path selection and data display.")
