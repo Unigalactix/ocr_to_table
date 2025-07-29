@@ -39,6 +39,8 @@ Easily extract and view tabular data from files stored in Azure Blob Storage usi
 1. Run the app:
    ```sh
    streamlit run app.py
+   OR
+   python -m streamlit run app.py 
    ```
 2. Enter credentials if prompted
 3. Select a file from the dropdown
