@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints
+
+# VS Code
+.vscode/
+
+# Environment
+.env
+*.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Azure/Secrets
+*.json
+!tbudgetdb.json
+
+# Streamlit
+.streamlit/
+
+# Logs
+*.log
+
+# Ignore large files
+*.bak
+*.tmp
+
+# Ignore test output
+htmlcov/
+coverage.xml
+
+# Ignore package management
+pip-wheel-metadata/
+
+# Ignore node modules (if any)
+node_modules/
