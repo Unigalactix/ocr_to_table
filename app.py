@@ -77,6 +77,9 @@ def run_connection_and_show_data(selected_path):
                 # Ignore labels that are only symbols or punctuation
                 if all(c in ",.:-_()[]{}|/\\'\"!@#$%^&*" for c in label_clean):
                     continue
+                # Ignore amounts that are only punctuation/symbols
+                if all(c in ",.:-_()[]{}|/\\'\"!@#$%^&*" for c in amount.strip()):
+                    continue
                 # Ignore labels that are only city names (case-insensitive, no description)
                 label_key = label_clean.lower()
                 if any(addr in label_key for addr in address_keywords):
@@ -151,6 +154,9 @@ def run_connection_and_show_data(selected_path):
             for label, amount in summary_matches:
                 label_clean = label.strip()
                 if label_clean.isdigit():
+                    continue
+                # Ignore amounts that are only punctuation/symbols
+                if all(c in ",.:-_()[]{}|/\\'\"!@#$%^&*" for c in amount.strip()):
                     continue
                 label_key = label_clean.lower()
                 if any(addr in label_key for addr in address_keywords):
