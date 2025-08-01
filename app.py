@@ -1,580 +1,416 @@
 
-import streamlit as st
-import pandas as pd
-import time # For simulating connection delay
-import json
+
 import os
-import io
-import logging
-from streamlit_extras.dataframe_explorer import dataframe_explorer
-
-
-
-st.markdown(
-    "<style>div.block-container{padding-top:1rem;}</style>", unsafe_allow_html=True
-)
-# --- Load storage account info from tbudgetdb.json ---
-json_path = "tbudgetdb.json"
-account_name = ""
-blob_endpoint = ""
-default_container = "budget-docs"  # fallback
-if os.path.exists(json_path):
-    with open(json_path, "r") as f:
-        data = json.load(f)
-        # Try to get account name and blob endpoint
-        account_name = data.get("name", "")
-        blob_endpoint = data.get("primaryEndpoints", {}).get("blob", "")
-        # Try to get default container name if present
-        # Look for a property named 'container', else fallback
-        default_container = data.get("container", default_container)
-
-# --- Load default key from .env ---
 from dotenv import load_dotenv
+from azure.storage.blob import BlobServiceClient
+from azure.ai.formrecognizer import DocumentAnalysisClient
+from azure.core.credentials import AzureKeyCredential
+import pandas as pd
+import streamlit as st
+
+# Load environment variables
 load_dotenv()
-default_key = os.getenv("AZURE_BLOB_KEY", "")
+AZURE_BLOB_CONNECTION_STRING = os.getenv("AZURE_BLOB_CONNECTION_STRING")
+AZURE_BLOB_KEY = os.getenv("AZURE_BLOB_KEY")
+AZURE_BLOB_CONTAINER = os.getenv("AZURE_BLOB_CONTAINER", "budget-docs")
+AZURE_FORMRECOGNIZER_ENDPOINT = os.getenv("AZURE_FORMRECOGNIZER_ENDPOINT")
+AZURE_FORMRECOGNIZER_KEY = os.getenv("AZURE_FORMRECOGNIZER_KEY")
 
-
-def run_connection_and_show_data(selected_path, ocr_lang='eng'):
-    """
-    Connects to Azure Blob Storage and reads a file of any format.
-    """
-    from azure.storage.blob import BlobServiceClient
-    import io
-    with st.spinner('Connecting to Azure Blob Storage... 💸'):
-        time.sleep(1)
-    try:
-        blob_service_client = BlobServiceClient.from_connection_string(selected_path['connection_string'])
-        blob_client = blob_service_client.get_blob_client(container=selected_path['container_name'], blob=selected_path['blob_name'])
-        blob_data = blob_client.download_blob().readall()
-        file_format = selected_path['file_format'].lower()
-        # Defensive: handle empty files
-        if not blob_data or (isinstance(blob_data, bytes) and len(blob_data) == 0):
-            st.warning("The selected file is empty.")
-            return None
-        # OCR logic for any file format
-        import pytesseract
-        from PIL import Image
-        import tempfile
-        import pdfplumber
-        import re
-        import matplotlib.pyplot as plt
-        ocr_text = None
-        # PDF logic: extract tables as-is, then OCR for summary if needed
-        if file_format == 'pdf' or selected_path['blob_name'].lower().endswith('.pdf'):
-            import numpy as np
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_pdf:
-                tmp_pdf.write(blob_data)
-                tmp_pdf.flush()
-                with pdfplumber.open(tmp_pdf.name) as pdf:
-                    all_tables = []
-                    for page in pdf.pages:
-                        tables = page.extract_tables()
-                        for table in tables:
-                            # Convert to DataFrame and append if not empty
-                            if len(table) > 1:
-                                columns = table[0]
-                                seen = set()
-                                unique_columns = []
-                                for col in columns:
-                                    col_name = str(col) if col is not None else "Column"
-                                    count = 1
-                                    while col_name in seen:
-                                        col_name = f"{col}_{count}"
-                                        count += 1
-                                    unique_columns.append(col_name)
-                                    seen.add(col_name)
-                                try:
-                                    df_table = pd.DataFrame(table[1:], columns=unique_columns)
-                                except Exception as e:
-                                    st.info(f"PDF table parse error: {e}")
-                                    continue
-                            else:
-                                df_table = pd.DataFrame(table)
-                            if not df_table.empty:
-                                all_tables.append(df_table)
-                    if all_tables:
-                        def get_label_amount_table(df):
-                            cols = [c.lower() for c in df.columns]
-                            label_col = None
-        if file_format == 'csv':
-            try:
-                df = pd.read_csv(io.BytesIO(blob_data))
-                st.success(f"Successfully loaded CSV file from blob storage!")
-                st.dataframe(df)
-                csv_data = df.to_csv(index=False).encode('utf-8')
-                json_data = df.to_json(orient='records', force_ascii=False, indent=2).encode('utf-8')
-                st.download_button(
-                    label="Download as CSV",
-                    data=csv_data,
-                    file_name="data.csv",
-                    mime="text/csv"
-                )
-                st.download_button(
-                    label="Download as JSON",
-                    data=json_data,
-                    file_name="data.json",
-                    mime="application/json"
-                )
-                return df
-            except Exception as e:
-                st.error(f"CSV read error: {e}")
-                return None
-        elif file_format == 'excel' or file_format == 'xlsx':
-            try:
-                excel_file = pd.ExcelFile(io.BytesIO(blob_data))
-                all_sheets = []
-                for sheet_name in excel_file.sheet_names:
-                    df = excel_file.parse(sheet_name)
-                    st.write(f"Sheet: {sheet_name}")
-                    st.dataframe(df)
-                    # Visualization: Bar chart for numeric columns
-                    try:
-                        numeric_cols = df.select_dtypes(include='number').columns
-                        if len(numeric_cols) > 0:
-                            st.bar_chart(df[numeric_cols])
-                    except Exception as e:
-                        st.info(f"Visualization error: {e}")
-                    all_sheets.append(df)
-                st.success(f"Successfully loaded Excel file from blob storage!")
-                if all_sheets:
-                    df_all = pd.concat(all_sheets, ignore_index=True)
-                    csv_data = df_all.to_csv(index=False).encode('utf-8')
-                    json_data = df_all.to_json(orient='records', force_ascii=False, indent=2).encode('utf-8')
-                    st.download_button(
-                        label="Download as CSV",
-                        data=csv_data,
-                        file_name="excel_data.csv",
-                        mime="text/csv"
-                    )
-                    st.download_button(
-                        label="Download as JSON",
-                        data=json_data,
-                        file_name="excel_data.json",
-                        mime="application/json"
-                    )
-                return None
-            except Exception as e:
-                st.error(f"Excel read error: {e}")
-                return None
-        elif file_format == 'json':
-            try:
-                df = pd.read_json(io.BytesIO(blob_data))
-                st.success(f"Successfully loaded JSON file from blob storage!")
-                st.dataframe(df)
-                return df
-            except Exception as e:
-                st.error(f"JSON read error: {e}")
-                return None
-        # Try OCR if file is image or fallback for other formats
-        if file_format in ['png', 'jpg', 'jpeg', 'bmp', 'tiff'] or selected_path['blob_name'].lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff')):
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.' + file_format) as tmp_img:
-                tmp_img.write(blob_data)
-                tmp_img.flush()
-                image = Image.open(tmp_img.name)
-                ocr_text = pytesseract.image_to_string(image, lang=ocr_lang)
-        else:
-            # Try to open as image anyway
-            try:
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp_img:
-                    tmp_img.write(blob_data)
-                    tmp_img.flush()
-                    image = Image.open(tmp_img.name)
-                    ocr_text = pytesseract.image_to_string(image, lang=ocr_lang)
-            except Exception:
-                ocr_text = None
-        if ocr_text:
-            # For non-PDF files, try to extract all items/services and amounts
-            summary_pattern = r"(?i)(total|subtotal|budget|[A-Za-z0-9 \-]+)\s*[:\-]?\s*\$?([\d,]+(?:\.\d{2})?)"
-            summary_matches = re.findall(summary_pattern, ocr_text)
-            table_rows = []
-            label_count = {}
-            subtotal_row = None
-            total_row = None
-            address_keywords = ["pin", "house", "street", "road", "avenue", "block", "no", "number", "zip", "postal", "address"]
-            for label, amount in summary_matches:
-                label_clean = label.strip()
-                if label_clean.isdigit():
-                    continue
-                # Ignore amounts that are only punctuation/symbols
-                if all(c in ",.:-_()[]{}|/\\'\"!@#$%^&*" for c in amount.strip()):
-                    continue
-                label_key = label_clean.lower()
-                if any(addr in label_key for addr in address_keywords):
-                    continue
-                if label_key in label_count:
-                    label_count[label_key] += 1
-                    label_display = f"{label_clean}_x{label_count[label_key]}"
-                else:
-                    label_count[label_key] = 1
-                    label_display = label_clean
-                if label_key in ["subtotal"]:
-                    subtotal_row = {"Label": "Subtotal", "Amount": amount}
-                elif label_key in ["total", "amount", "total amount", "grand total"]:
-                    total_row = {"Label": "Total", "Amount": amount}
-                else:
-                    table_rows.append({"Label": label_display, "Amount": amount})
-            seen = set()
-            unique_rows = []
-            for row in table_rows:
-                key = (row["Label"].lower(), row["Amount"])
-                if key not in seen:
-                    unique_rows.append(row)
-                    seen.add(key)
-            if subtotal_row:
-                unique_rows.append(subtotal_row)
-            if total_row:
-                unique_rows.append(total_row)
-            if unique_rows:
-                df = pd.DataFrame(unique_rows)
-                st.success("Extracted items/services and amounts from file!")
-                st.dataframe(df)
-                if total_row:
-                    st.markdown(f"**Total Amount:** {total_row['Amount']}")
-                return df
-            else:
-                st.warning("No items/services or amounts found in file.")
-                possible_labels = ["Item/Service", "Subtotal", "Total"]
-                df = pd.DataFrame({"Label": possible_labels, "Amount": ["-"]*len(possible_labels)})
-                st.dataframe(df)
-                return df
-        # Fallback to original logic
-        if file_format == 'csv':
-            df = pd.read_csv(io.BytesIO(blob_data))
-            st.success(f"Successfully loaded CSV file from blob storage!")
-            st.dataframe(df)
-            # Visualization: Bar chart for numeric columns
-            try:
-                numeric_cols = df.select_dtypes(include='number').columns
-                if len(numeric_cols) > 0:
-                    st.bar_chart(df[numeric_cols])
-            except Exception as e:
-                st.info(f"Visualization error: {e}")
-            csv_data = df.to_csv(index=False).encode('utf-8')
-            json_data = df.to_json(orient='records', force_ascii=False, indent=2).encode('utf-8')
-            st.download_button(
-                label="Download as CSV",
-                data=csv_data,
-                file_name="data.csv",
-                mime="text/csv"
-            )
-            st.download_button(
-                label="Download as JSON",
-                data=json_data,
-                file_name="data.json",
-                mime="application/json"
-            )
-            return df
-        elif file_format == 'excel' or file_format == 'xlsx':
-            excel_file = pd.ExcelFile(io.BytesIO(blob_data))
-            all_sheets = []
-            for sheet_name in excel_file.sheet_names:
-                df = excel_file.parse(sheet_name)
-                st.write(f"Sheet: {sheet_name}")
-                st.dataframe(df)
-                # Visualization: Bar chart for numeric columns
-                try:
-                    numeric_cols = df.select_dtypes(include='number').columns
-                    if len(numeric_cols) > 0:
-                        st.bar_chart(df[numeric_cols])
-                except Exception as e:
-                    st.info(f"Visualization error: {e}")
-                all_sheets.append(df)
-            st.success(f"Successfully loaded Excel file from blob storage!")
-            if all_sheets:
-                df_all = pd.concat(all_sheets, ignore_index=True)
-                csv_data = df_all.to_csv(index=False).encode('utf-8')
-                json_data = df_all.to_json(orient='records', force_ascii=False, indent=2).encode('utf-8')
-                st.download_button(
-                    label="Download as CSV",
-                    data=csv_data,
-                    file_name="excel_data.csv",
-                    mime="text/csv"
-                )
-                st.download_button(
-                    label="Download as JSON",
-                    data=json_data,
-                    file_name="excel_data.json",
-                    mime="application/json"
-                )
-            return None
-        elif file_format == 'json':
-            df = pd.read_json(io.BytesIO(blob_data))
-            st.success(f"Successfully loaded JSON file from blob storage!")
-            st.dataframe(df)
-            return df
-        else:
-            st.info("File format not recognized for tabular display. Downloading raw file.")
-            # Show download button for raw file
-            file_name = selected_path.get('blob_name', 'raw_file')
-            st.download_button(
-                label=f"Download Raw File ({file_name})",
-                data=blob_data,
-                file_name=file_name,
-                mime="application/octet-stream"
-            )
-            return None
-    except Exception as e:
-        st.error(f"Error reading from blob storage: {e}")
+def get_blob_service_client():
+    if AZURE_BLOB_CONNECTION_STRING:
+        return BlobServiceClient.from_connection_string(AZURE_BLOB_CONNECTION_STRING)
+    elif AZURE_BLOB_KEY:
+        st.warning("Connection string is preferred. Using key directly may not work for all setups.")
+        return BlobServiceClient(account_url=f"https://{AZURE_BLOB_CONTAINER}.blob.core.windows.net", credential=AZURE_BLOB_KEY)
+    else:
+        st.error("No Azure Blob Storage credentials found in .env.")
         return None
 
-
-
-
-st.set_page_config(layout="centered", page_title="Blob Data Viewer")
-
-
-st.title("Azure Blob Storage File Reader")
-
-
-# --- Error Logging ---
-if 'error_log' not in st.session_state:
-    st.session_state['error_log'] = []
-def log_error(msg):
-    st.session_state['error_log'].append(msg)
-
-
-
-st.header("1. Azure Blob Storage Connection")
-# Hide technical details for a cleaner UI
-# st.write(f"**Storage Account Name:** {account_name}")
-# st.write(f"**Blob Endpoint:** {blob_endpoint}")
-
-
-# Use default key from .env if present, else prompt for it
-if default_key:
-    account_key = default_key
-    # st.write("Using default key from .env file.")  # Hide technical info
-else:
-    account_key = st.text_input("Account Key (from Azure Portal)", type="password")
-
-
-# Use container name from .env or fallback
-
-# --- Incorporate check_blob.py logic for blob listing ---
-from azure.storage.blob import BlobServiceClient
-
-# Use container name from .env or fallback
-container_name = os.getenv("AZURE_BLOB_CONTAINER", default_container)
-
-# Build connection string dynamically
-connection_string = os.getenv(
-    "AZURE_BLOB_CONNECTION_STRING",
-    f"DefaultEndpointsProtocol=https;AccountName={account_name};AccountKey={account_key};EndpointSuffix=core.windows.net"
-)
-
-blob_name = None
-files = []
-if connection_string and container_name:
+def list_blobs_in_container(container_name):
+    blob_service_client = get_blob_service_client()
+    if not blob_service_client:
+        return []
     try:
-        blob_service_client = BlobServiceClient.from_connection_string(connection_string)
         container_client = blob_service_client.get_container_client(container_name)
-        # Hide blob listing status for clean UI
-        for blob in container_client.list_blobs():
-            name = blob.name
-            # Only include files in the root (no '/')
-            if '/' not in name:
-                files.append(name)
-        if files:
-            blob_name = st.selectbox("Select a file", sorted(files))
-        else:
-            st.warning("No files found in the root of the container.")
+        blobs = container_client.list_blobs()
+        return [blob.name for blob in blobs if '/' not in blob.name and '\\' not in blob.name]
     except Exception as e:
-        st.error("Unable to access Azure Blob Storage. Please check your credentials or try again later.")
-else:
-    st.warning("Unable to access blob storage. Please check your credentials.")
+        st.error(f"Error listing blobs: {e}")
+        return []
 
-
-# Infer file format from file extension
-file_format = "other"
-if blob_name:
-    if blob_name.lower().endswith(".csv"):
-        file_format = "csv"
-    elif blob_name.lower().endswith(".xlsx") or blob_name.lower().endswith(".xls"):
-        file_format = "excel"
-    elif blob_name.lower().endswith(".json"):
-        file_format = "json"
-    elif blob_name.lower().endswith(".pdf"):
-        file_format = "pdf"
-
-selected_path_value = {
-    'connection_string': connection_string,
-    'container_name': container_name,
-    'blob_name': blob_name,
-    'file_format': file_format
-}
-
-
-
-
-
-# --- OCR Language Selection ---
-st.sidebar.write("## OCR Language")
-ocr_lang = st.sidebar.text_input("Tesseract language code (e.g. 'eng', 'deu', 'fra')", value="eng", help="See https://tesseract-ocr.github.io/tessdoc/Data-Files-in-different-versions.html for codes.")
-
-# --- File Upload Option ---
-st.subheader("Or Upload a Local File")
-uploaded_file = st.file_uploader("Choose a file", type=["csv", "xlsx", "xls", "json", "pdf", "png", "jpg", "jpeg", "bmp", "tiff"], help="Accessible file uploader")
-
-def handle_uploaded_file(uploaded_file):
-    file_name = uploaded_file.name
-    file_format = "other"
-    if file_name.lower().endswith(".csv"):
-        file_format = "csv"
-    elif file_name.lower().endswith(".xlsx") or file_name.lower().endswith(".xls"):
-        file_format = "excel"
-    elif file_name.lower().endswith(".json"):
-        file_format = "json"
-    elif file_name.lower().endswith(".pdf"):
-        file_format = "pdf"
+def download_blob_to_bytes(blob_name, container_name):
+    blob_service_client = get_blob_service_client()
+    if not blob_service_client:
+        return None
     try:
-        if file_format == 'csv':
-            df = pd.read_csv(uploaded_file)
-            st.dataframe(df)
-            try:
-                numeric_cols = df.select_dtypes(include='number').columns
-                if len(numeric_cols) > 0:
-                    st.bar_chart(df[numeric_cols])
-            except Exception as e:
-                st.info(f"Visualization error: {e}")
-            csv_data = df.to_csv(index=False).encode('utf-8')
-            json_data = df.to_json(orient='records', force_ascii=False, indent=2).encode('utf-8')
-            st.download_button("Download as CSV", csv_data, file_name="data.csv", mime="text/csv")
-            st.download_button("Download as JSON", json_data, file_name="data.json", mime="application/json")
-        elif file_format == 'excel':
-            excel_file = pd.ExcelFile(uploaded_file)
-            sheet = st.selectbox("Select sheet", excel_file.sheet_names)
-            df = excel_file.parse(sheet)
-            st.dataframe(df)
-            try:
-                numeric_cols = df.select_dtypes(include='number').columns
-                if len(numeric_cols) > 0:
-                    st.bar_chart(df[numeric_cols])
-            except Exception as e:
-                st.info(f"Visualization error: {e}")
-            csv_data = df.to_csv(index=False).encode('utf-8')
-            json_data = df.to_json(orient='records', force_ascii=False, indent=2).encode('utf-8')
-            st.download_button("Download as CSV", csv_data, file_name="excel_data.csv", mime="text/csv")
-            st.download_button("Download as JSON", json_data, file_name="excel_data.json", mime="application/json")
-        elif file_format == 'json':
-            df = pd.read_json(uploaded_file)
-            st.dataframe(df)
-        elif file_format == 'pdf':
-            import pdfplumber
-            import tempfile
-            import os
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_pdf:
-                tmp_pdf.write(uploaded_file.read())
-                tmp_pdf.flush()
-                try:
-                    with pdfplumber.open(tmp_pdf.name) as pdf:
-                        all_tables = []
-                        for page_num, page in enumerate(pdf.pages):
-                            tables = page.extract_tables()
-                            for table in tables:
-                                if len(table) > 1:
-                                    df = pd.DataFrame(table[1:], columns=table[0])
-                                    st.write(f"Page {page_num+1} Table:")
-                                    st.dataframe(df)
-                                    all_tables.append(df)
-                        if not all_tables:
-                            st.info("No tables found in PDF. Preview not available.")
-                except Exception as e:
-                    st.error(f"PDF preview error: {e}")
-                finally:
-                    os.unlink(tmp_pdf.name)
-        else:
-            st.info("Preview not supported for this file type.")
+        blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
+        return blob_client.download_blob().readall()
     except Exception as e:
-        log_error(f"Upload error: {e}")
-        st.error(f"Error reading uploaded file: {e}")
+        st.error(f"Error downloading blob '{blob_name}': {e}")
+        return None
 
-if uploaded_file:
-    handle_uploaded_file(uploaded_file)
-
-
-if blob_name and not uploaded_file:
-    if 'is_running' not in st.session_state:
-        st.session_state['is_running'] = False
-    if 'start_time' not in st.session_state:
-        st.session_state['start_time'] = None
-    run_btn_label = "CANCEL" if st.session_state['is_running'] else "RUN"
-    col1, col2 = st.columns([1,2])
-    with col1:
-        run_btn = st.button(run_btn_label, help="Activate to process the selected file" if not st.session_state['is_running'] else "Cancel the running process")
-    with col2:
-        if st.session_state['is_running']:
-            import datetime
-            # For demonstration, assume ETA is 30 seconds minus elapsed
-            if st.session_state['start_time'] is None:
-                st.session_state['start_time'] = datetime.datetime.now()
-            elapsed = (datetime.datetime.now() - st.session_state['start_time']).total_seconds()
-            eta = max(0, 30 - int(elapsed))
-            st.info(f"ETA: {eta} seconds")
+def analyze_with_document_intelligence(file_bytes, file_name):
+    if not (AZURE_FORMRECOGNIZER_ENDPOINT and AZURE_FORMRECOGNIZER_KEY):
+        st.error("Azure Document Intelligence credentials not set in .env.")
+        return None, None
+    client = DocumentAnalysisClient(
+        endpoint=AZURE_FORMRECOGNIZER_ENDPOINT,
+        credential=AzureKeyCredential(AZURE_FORMRECOGNIZER_KEY)
+    )
+    # 1. Layout analysis (extract budget/total/amount from tables only)
+    layout_budget = []
+    layout_tables = []
+    merged_table = None
+    try:
+        st.sidebar.info("🔍 Starting layout analysis...")
+        poller = client.begin_analyze_document("prebuilt-layout", file_bytes)
+        layout_result = poller.result()
+        st.sidebar.success("✅ Layout analysis completed")
+        # Process all tables from all pages
+        if hasattr(layout_result, "tables") and layout_result.tables:
+            st.sidebar.info(f"📊 Processing {len(layout_result.tables)} tables from layout...")
+            for idx, table in enumerate(layout_result.tables):
+                st.sidebar.info(f"📄 Processing table {idx+1}/{len(layout_result.tables)} (Page {table.bounding_regions[0].page_number if table.bounding_regions else 'Unknown'})")
+                rows = []
+                for row_idx in range(table.row_count):
+                    row = []
+                    for col_idx in range(table.column_count):
+                        cell = next((c for c in table.cells if c.row_index == row_idx and c.column_index == col_idx), None)
+                        row.append(cell.content if cell else "")
+                    rows.append(row)
+                df = pd.DataFrame(rows)
+                layout_tables.append(df)
+                # Search for budget/total/amount in table with comprehensive keywords
+                budget_keywords = [
+                    "budget", "total", "amount", "grand total", "net amount", "sub-total", "subtotal", 
+                    "sub total", "final total", "overall total", "total amount", "total cost", 
+                    "total price", "sum", "budget amount", "budget total", "cost", "price", 
+                    "invoice total", "bill total", "payment", "due", "balance", "gross", 
+                    "net", "final", "overall", "aggregate", "cumulative", "grand sum"
+                ]
+                
+                # Priority keywords for final budget (higher priority = more likely to be final budget)
+                final_budget_keywords = [
+                    "grand total", "final total", "overall total", "total amount", "net amount",
+                    "invoice total", "bill total", "total", "amount", "balance", "due"
+                ]
+                
+                for r in rows:
+                    for i, cell in enumerate(r):
+                        cell_str = str(cell).lower().strip()
+                        if any(kw in cell_str for kw in budget_keywords):
+                            # Look for value in next cell or same row
+                            value = r[i+1] if i+1 < len(r) else None
+                            # Also check if current cell contains both label and value
+                            if value is None and any(char.isdigit() for char in str(cell)):
+                                value = cell
+                            
+                            # Determine priority based on keywords
+                            priority = 0
+                            for idx, final_kw in enumerate(final_budget_keywords):
+                                if final_kw in cell_str:
+                                    priority = len(final_budget_keywords) - idx  # Higher number = higher priority
+                                    break
+                            
+                            layout_budget.append((cell, value, priority))
+                for col in df.columns:
+                    col_data = df[col].astype(str).str.lower()
+                    for idx2, val in enumerate(col_data):
+                        val_str = str(val).lower().strip()
+                        if any(kw in val_str for kw in budget_keywords):
+                            # Look for value in next column or same cell
+                            value = df.iloc[idx2, col+1] if col+1 < df.shape[1] else None
+                            # Also check if current cell contains both label and value
+                            if value is None and any(char.isdigit() for char in str(val)):
+                                value = val
+                            
+                            # Determine priority based on keywords
+                            priority = 0
+                            for idx, final_kw in enumerate(final_budget_keywords):
+                                if final_kw in val_str:
+                                    priority = len(final_budget_keywords) - idx  # Higher number = higher priority
+                                    break
+                            
+                            layout_budget.append((val, value, priority))
+            # Merge related tables: if all tables have the same columns, concatenate them
+            if layout_tables:
+                st.sidebar.info("🔗 Checking for table merging opportunities...")
+                first_cols = [tuple(df.columns) for df in layout_tables]
+                if all(cols == first_cols[0] for cols in first_cols):
+                    merged_table = pd.concat(layout_tables, ignore_index=True)
+                    st.sidebar.success("✅ Tables merged successfully")
+                else:
+                    merged_table = None
+                    st.sidebar.info("ℹ️ Tables have different structures - keeping separate")
         else:
-            st.session_state['start_time'] = None
-    if run_btn:
-        if not st.session_state['is_running']:
-            st.session_state['is_running'] = True
-            st.session_state['start_time'] = None
+            st.sidebar.warning("⚠️ No tables found in layout analysis")
+    except Exception as e:
+        st.sidebar.error(f"❌ Layout analysis failed: {e}")
+        st.error(f"Layout analysis failed: {e}")
+
+    # Determine the best prebuilt model based on layout analysis content
+    def determine_best_model(layout_tables, file_name):
+        """Determine the best prebuilt model based on content analysis"""
+        # Start with file name hints
+        if any(x in file_name.lower() for x in ["invoice"]):
+            base_model = "prebuilt-invoice"
+        elif any(x in file_name.lower() for x in ["receipt"]):
+            base_model = "prebuilt-receipt"
         else:
-            st.session_state['is_running'] = False
-            st.session_state['start_time'] = None
-            st.warning("Process cancelled by user.")
-    if st.session_state['is_running']:
-        selected_path_value = {
-            'connection_string': connection_string,
-            'container_name': container_name,
-            'blob_name': blob_name,
-            'file_format': file_format
-        }
+            base_model = "prebuilt-document"
+        
+        # Analyze content from layout tables for better model selection
+        if layout_tables:
+            all_text = ""
+            for df in layout_tables:
+                all_text += " " + " ".join(df.astype(str).values.flatten())
+            all_text = all_text.lower()
+            
+            # Invoice indicators
+            invoice_indicators = ["invoice", "bill to", "ship to", "invoice number", "invoice date", 
+                                "vendor", "customer", "tax", "vat", "subtotal", "line item"]
+            invoice_score = sum(1 for indicator in invoice_indicators if indicator in all_text)
+            
+            # Receipt indicators  
+            receipt_indicators = ["receipt", "store", "cashier", "register", "purchase", "transaction",
+                                "change", "cash", "card", "tender"]
+            receipt_score = sum(1 for indicator in receipt_indicators if indicator in all_text)
+            
+            # Choose model with highest score
+            if invoice_score > receipt_score and invoice_score >= 2:
+                return "prebuilt-invoice"
+            elif receipt_score >= 2:
+                return "prebuilt-receipt"
+        
+        return base_model
+
+    # 2. Prebuilt model (intelligently selected based on layout analysis)
+    model_budget = []
+    model_id = determine_best_model(layout_tables, file_name)
+    st.sidebar.info(f"🧠 Intelligent model selection: {model_id}")
+    
+    st.sidebar.info(f"🤖 Starting prebuilt model analysis ({model_id})...")
+    try:
+        poller = client.begin_analyze_document(model_id, file_bytes)
+        result = poller.result()
+        st.sidebar.success(f"✅ Prebuilt model analysis completed")
+        
+        if hasattr(result, "documents") and result.documents:
+            st.sidebar.info(f"📋 Processing {len(result.documents)} document(s) from prebuilt model...")
+            doc = result.documents[0]
+            budget_keywords = [
+                "budget", "total", "amount", "grand total", "net amount", "sub-total", "subtotal", 
+                "sub total", "final total", "overall total", "total amount", "total cost", 
+                "total price", "sum", "budget amount", "budget total", "cost", "price", 
+                "invoice total", "bill total", "payment", "due", "balance", "gross", 
+                "net", "final", "overall", "aggregate", "cumulative", "grand sum"
+            ]
+            for k, v in doc.fields.items():
+                k_lower = k.lower().strip()
+                if any(kw in k_lower for kw in budget_keywords):
+                    val = v.value if hasattr(v, "value") else v
+                    model_budget.append((k, val))
+            
+            if model_budget:
+                st.sidebar.success(f"✅ Found {len(model_budget)} budget-related field(s) in prebuilt model")
+            else:
+                st.sidebar.warning("⚠️ No budget fields found in prebuilt model")
+        else:
+            st.sidebar.warning("⚠️ No documents found in prebuilt model results")
+    except Exception as e:
+        st.sidebar.error(f"❌ Prebuilt model analysis failed: {e}")
+        st.error(f"Prebuilt model analysis failed: {e}")
+
+    st.sidebar.success("🎉 Document analysis completed!")
+    
+    # Extract the final budget value (highest priority)
+    final_budget = None
+    if layout_budget:
+        # Sort by priority (highest first) and get the top result
+        layout_budget.sort(key=lambda x: x[2], reverse=True)
+        final_budget = layout_budget[0]  # (label, value, priority)
+    
+    return final_budget, layout_tables, model_budget, model_id, merged_table
+
+st.set_page_config(page_title="Budget Extractor", layout="centered")
+st.title("Budget Extractor")
+
+# File source selection
+file_source = st.sidebar.radio("Choose file source:", ["Azure Blob Storage", "Local Upload"])
+
+selected_file = None
+uploaded_file = None
+file_bytes = None
+
+if file_source == "Azure Blob Storage":
+    st.sidebar.header("Azure Blob Storage")
+    blob_files = list_blobs_in_container(AZURE_BLOB_CONTAINER)
+    selected_file = st.sidebar.selectbox("Select a file to process:", blob_files)
+else:
+    st.sidebar.header("Local File Upload")
+    uploaded_file = st.sidebar.file_uploader(
+        "Choose a file to upload",
+        type=['pdf', 'png', 'jpg', 'jpeg', 'bmp', 'tiff', 'xlsx', 'xls', 'csv', 'json']
+    )
+
+# Check if file is already processed to show appropriate button text
+current_file = selected_file if file_source == "Azure Blob Storage" else (uploaded_file.name if uploaded_file else None)
+cache_key = f"processed_{current_file}" if current_file else None
+is_processed = cache_key and cache_key in st.session_state
+button_text = "RE-RUN" if is_processed else "RUN"
+
+# Only show the run button if a file is selected/uploaded
+if current_file:
+    run_analysis = st.sidebar.button(button_text)
+else:
+    run_analysis = False
+    st.sidebar.info("Please select or upload a file to process.")
+
+if current_file and run_analysis:
+    st.info(f"Processing: {current_file}")
+    
+    # Clear previous analysis status
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📊 Analysis Progress")
+    
+    # Get file bytes based on source
+    if file_source == "Azure Blob Storage":
+        st.sidebar.info("📥 Downloading file from Azure Blob Storage...")
+        file_bytes = download_blob_to_bytes(selected_file, AZURE_BLOB_CONTAINER)
+        if not file_bytes:
+            st.error("Could not download the selected file.")
+            st.stop()
+        file_name = selected_file
+        st.sidebar.success("✅ File downloaded successfully")
+    else:  # Local upload
+        st.sidebar.info("📁 Reading uploaded file...")
+        file_bytes = uploaded_file.read()
+        file_name = uploaded_file.name
+        st.sidebar.success("✅ File read successfully")
+    
+    # Show selected prebuilt model in sidebar during processing
+    ext = os.path.splitext(file_name)[1].lower()
+    if ext in [".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".tiff"]:
+        st.sidebar.info("🔍 Will analyze layout first, then select optimal prebuilt model")
+    
+    use_cache = False  # Always reprocess when button is clicked
+    final_budget, layout_tables, model_budget, model_id = None, None, None, None
+    excel_sheets, csv_df, json_data = None, None, None
+    
+    if ext in [".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".tiff"]:
+        st.sidebar.info("🔍 Starting Document Intelligence analysis...")
+        final_budget, layout_tables, model_budget, model_id, merged_table = analyze_with_document_intelligence(file_bytes, file_name)
+    elif ext in [".xlsx", ".xls"]:
+        st.sidebar.info("📊 Processing Excel file...")
         try:
-            # Accessibility: Announce processing
-            st.markdown('<div aria-live="polite" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;">Processing file...</div>', unsafe_allow_html=True)
-            df = run_connection_and_show_data(selected_path_value, ocr_lang=ocr_lang)
-            # --- Sheet Selection for Excel ---
-            if file_format in ["excel", "xlsx"] and df is not None:
-                st.write("Select sheet to view:")
-                # Already handled in run_connection_and_show_data if needed
-            # --- Pagination and Filtering ---
-            if isinstance(df, pd.DataFrame) and len(df) > 0:
-                st.write("Filter/Search Table:")
-                filtered_df = dataframe_explorer(df, case=False)
-                st.dataframe(filtered_df)
-                st.write("Pagination:")
-                page_size = st.number_input("Rows per page", min_value=5, max_value=100, value=20)
-                total_pages = (len(filtered_df) - 1) // page_size + 1
-                page = st.number_input("Page", min_value=1, max_value=total_pages, value=1)
-                start = (page - 1) * page_size
-                end = start + page_size
-                st.dataframe(filtered_df.iloc[start:end])
-            st.session_state['is_running'] = False
-            st.session_state['start_time'] = None
+            import openpyxl
+            import io
+            wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+            excel_sheets = {}
+            for sheetname in wb.sheetnames:
+                ws = wb[sheetname]
+                rows = [row for row in ws.iter_rows(values_only=True)]
+                df = pd.DataFrame(rows)
+                excel_sheets[sheetname] = df
+            st.sidebar.success(f"✅ Excel file processed - {len(excel_sheets)} sheet(s) found")
         except Exception as e:
-            log_error(f"Blob error: {e}")
-            st.error(f"Error: {e}")
-            st.session_state['is_running'] = False
-            st.session_state['start_time'] = None
+            st.sidebar.error(f"❌ Excel processing failed: {e}")
+            st.error(f"Error reading Excel file: {e}")
+    elif ext == ".csv":
+        st.sidebar.info("📄 Processing CSV file...")
+        try:
+            import io
+            import csv
+            reader = csv.reader(io.StringIO(file_bytes.decode('utf-8')))
+            rows = [row for row in reader]
+            csv_df = pd.DataFrame(rows)
+            st.sidebar.success(f"✅ CSV file processed - {len(csv_df)} rows found")
+        except Exception as e:
+            st.sidebar.error(f"❌ CSV processing failed: {e}")
+            st.error(f"Error reading CSV file: {e}")
+    elif ext == ".json":
+        st.sidebar.info("🔧 Processing JSON file...")
+        try:
+            import json
+            json_data = json.loads(file_bytes.decode('utf-8'))
+            st.sidebar.success("✅ JSON file processed successfully")
+        except Exception as e:
+            st.sidebar.error(f"❌ JSON processing failed: {e}")
+            st.error(f"Error reading JSON file: {e}")
+    
+    # Final status
+    st.sidebar.markdown("---")
+    st.sidebar.success("🎉 All processing completed!")
+    
+    # Update cache with new results
+    st.session_state[cache_key] = {
+        'ext': ext,
+        'final_budget': final_budget,
+        'layout_tables': layout_tables,
+        'model_budget': model_budget,
+        'model_id': model_id,
+        'merged_table': merged_table,
+        'excel_sheets': excel_sheets,
+        'csv_df': csv_df,
+        'json_data': json_data
+    }
 
-# --- Async/Performance Note ---
-st.sidebar.info("For very large files, async/background processing is recommended. Streamlit currently processes synchronously, but you can use tools like Streamlit Community Cloud jobs or external APIs for heavy workloads.")
-
-# --- Error Log Download ---
-if st.sidebar.button("Download Error Log"):
-    log_content = "\n".join(st.session_state['error_log'])
-    st.sidebar.download_button("Download Error Log", log_content, file_name="error_log.txt")
-
-# --- User Feedback ---
-st.sidebar.write("## Feedback")
-feedback = st.sidebar.radio("Was the extraction correct?", ("👍 Yes", "👎 No"))
-if feedback:
-    st.sidebar.success("Thank you for your feedback!")
-
-# --- Help/Docs Link ---
-st.sidebar.markdown("[Help/Documentation](https://github.com/Unigalactix/ocr_to_table#readme)")
-
-st.sidebar.header("About")
-st.sidebar.info("This is a simple Streamlit application demonstrating path selection and data display.")
-
-st.sidebar.header("Instructions")
-st.sidebar.write("1. Select a storage path from the dropdown.")
-st.sidebar.write("2. Click the 'RUN' button to simulate connecting and displaying data.")
+    # Display results from cache or fresh
+    if ext in [".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".tiff"]:
+        st.subheader("Final Budget Amount")
+        if final_budget:
+            label, value, priority = final_budget
+            st.write(f"**{label}**: {value}")
+            st.info(f"Confidence: High (Priority score: {priority})")
+        else:
+            st.write("No final budget amount found in layout tables.")
+        st.subheader("Detected Tables (Layout)")
+        if merged_table is not None:
+            st.write("Merged Table (All Pages)")
+            st.dataframe(merged_table)
+            json_data = merged_table.to_json(orient='records', force_ascii=False, indent=2)
+            st.download_button(
+                label="Download Merged Table as JSON",
+                data=json_data,
+                file_name=f"{current_file}_merged_table.json",
+                mime="application/json"
+            )
+        elif layout_tables:
+            for idx, df in enumerate(layout_tables):
+                st.write(f"Table {idx+1}")
+                st.dataframe(df)
+                json_data = df.to_json(orient='records', force_ascii=False, indent=2)
+                st.download_button(
+                    label=f"Download Table {idx+1} as JSON",
+                    data=json_data,
+                    file_name=f"{current_file}_table{idx+1}.json",
+                    mime="application/json"
+                )
+        else:
+            st.write("No tables detected in layout.")
+        if model_budget:
+            st.subheader(f"Extracted Budget/Total/Amount (Prebuilt Model: {model_id})")
+            for label, value in model_budget:
+                st.write(f"{label}: {value}")
+    elif ext in [".xlsx", ".xls"]:
+        st.subheader("Excel file detected. Showing data directly:")
+        if excel_sheets:
+            for sheetname, df in excel_sheets.items():
+                st.write(f"Sheet: {sheetname}")
+                st.dataframe(df)
+        else:
+            st.write("No data found in Excel file.")
+    elif ext == ".csv":
+        st.subheader("CSV file detected. Showing data directly:")
+        if csv_df is not None:
+            st.dataframe(csv_df)
+        else:
+            st.write("No data found in CSV file.")
+    elif ext == ".json":
+        st.subheader("JSON file detected. Showing data directly:")
+        if json_data is not None:
+            st.json(json_data)
+        else:
+            st.write("No data found in JSON file.")
+    else:
+        st.warning(f"Unsupported file type: {ext}")

@@ -3,47 +3,16 @@
 Easily extract, view, and download tabular data from files stored in Azure Blob Storage or uploaded locally. Designed for invoices, receipts, and similar documents. Supports PDF, images, CSV, Excel, and JSON files.
 
 ---
-
-## Folder Structure
-
-- `app.py` — Main Streamlit application for file selection, extraction, and display
-- `requirements.txt` — All required Python dependencies
-- `README.md` — This documentation
-- `.env` — Your Azure Blob Storage credentials (not tracked by git)
-- `.gitignore` — Ignores `.env`, system files, and other non-essential files
-
----
-
-## Features
-
-- Connect to Azure Blob Storage using credentials from `.env` and (optionally) `tbudgetdb.json`
-- **Document Intelligence Integration:** Extract tables and key data from PDFs and images using Azure Document Intelligence (Form Recognizer) with your own model (see `.env` for keys and endpoint)
-- Select files (PDF, images, CSV, Excel, JSON) from your Azure container
-- **Upload local files** (CSV, Excel, JSON, PDF, images) for quick testing
-- **Sheet selection** for Excel files
-- **Pagination** and **column filtering/search** for large tables
 - **Download error log** for troubleshooting
-- **User feedback** (thumbs up/down) in sidebar
 - **Session state** remembers last selections
 - **Help/documentation link** in sidebar
 - **OCR language selection** (multi-language OCR support, legacy fallback)
-- **Visualization**: Pie/bar charts for quick insights
-- **Mobile responsive UI** (Streamlit layout hints)
-- **Accessibility**: ARIA labels, screen reader hints
-- **Performance note**: Async/background processing recommended for large files
 - Smart extraction: Only meaningful items/services and totals are shown; address/city/symbol-only labels are ignored
-- Deduplication: No duplicate items in the table
 - Subtotal and Total always shown at the bottom
 - Download extracted table as CSV or JSON (always available for every table)
 
 ---
 
-## Setup
-
-1. Clone the repository:
-   ```sh
-   git clone https://github.com/Unigalactix/ocr_to_table.git
-   cd ocr_to_table
    ```
 2. Install dependencies:
    ```sh
@@ -62,60 +31,61 @@ Easily extract, view, and download tabular data from files stored in Azure Blob 
 
 1. Run the app:
    ```sh
-   streamlit run app.py
-   # or
-   python -m streamlit run app.py
+
+# Budget Extractor (OCR to Table)
+
+This Streamlit app extracts tables and budget/total/amount fields from documents (PDFs, images, Excel, CSV, JSON) stored in Azure Blob Storage using Azure Document Intelligence. It provides a user-friendly UI for file selection, analysis, and table download.
+
+## Features
+
+- List files in Azure Blob Storage (main folder only)
+- Select a file from the sidebar
+- Click "RUN" to analyze the selected file
+- For PDFs/images: runs Document Intelligence layout and prebuilt model analysis
+- Extracts and displays only budget/total/amount fields from OCR and prebuilt models
+- Shows detected tables and allows download as JSON
+- For Excel, CSV, JSON: displays data directly
+
+## Setup
+
+1. Clone the repository
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
    ```
-2. Enter credentials if prompted
-3. Select a file from the dropdown **or upload a local file**
-4. For Excel files, select the sheet to view
-5. Use the filter/search box above tables to find data quickly
-6. Use pagination controls to browse large tables
-7. Download the table as CSV or JSON
-8. Download error log from the sidebar if needed
-9. Provide feedback in the sidebar
-11. Select OCR language in the sidebar for multi-language support
-12. View charts/graphs for quick insights
+3. Create a `.env` file with the following keys:
+   ```env
+   AZURE_BLOB_CONNECTION_STRING=your_blob_connection_string
+   AZURE_BLOB_KEY=your_blob_key (optional, if not using connection string)
+   AZURE_BLOB_CONTAINER=your_container_name
+   AZURE_FORMRECOGNIZER_ENDPOINT=your_form_recognizer_endpoint
+   AZURE_FORMRECOGNIZER_KEY=your_form_recognizer_key
+   ```
+4. Run the app:
+   ```bash
+   streamlit run app.py
+   ```
 
----
+## Usage
 
-## Workflow
+1. Select a file from the sidebar dropdown
+2. Click the "RUN" button
+3. For PDFs/images:
+   - Extracted budget/total/amount fields are shown
+   - Detected tables are displayed and can be downloaded as JSON
+   - Prebuilt model results for budget/total/amount are shown if found
+4. For Excel, CSV, JSON:
+   - Data is displayed directly
 
-1. **Configure Environment:**
-   - Add your Azure Blob Storage and Azure Document Intelligence credentials to the `.env` file as shown above.
-   - Install all dependencies with `pip install -r requirements.txt`.
+## Notes
 
-2. **Start the App:**
-   - Run `streamlit run app.py` from your project directory.
+- Only files in the main folder of the container are listed
+- Only budget/total/amount fields are extracted from OCR and prebuilt models
+- Download buttons are provided for detected tables
 
-3. **Connect to Azure Blob Storage:**
-   - The app will use your credentials to list available files in your Azure container.
-   - You can also upload local files for quick testing.
+## License
 
-4. **Select or Upload a File:**
-   - Choose a file from Azure Blob Storage or upload a local file (PDF, image, CSV, Excel, JSON).
-
-5. **Extraction & Processing:**
-   - For PDFs and images, the app uses Azure Document Intelligence (Form Recognizer) to extract tables and key data using your custom model.
-   - If Document Intelligence is not available or fails, the app falls back to legacy OCR (Tesseract/pytesseract and pdfplumber).
-   - For CSV, Excel, and JSON, the app loads and displays the data directly.
-
-6. **Review & Download:**
-   - Extracted tables are displayed in the app.
-   - Download the results as CSV or JSON using the provided buttons.
-   - For unrecognized file types, download the raw file.
-
-7. **Feedback & Logs:**
-   - Provide feedback in the sidebar.
-   - Download error logs if needed for troubleshooting.
-
----
-
-## File Types Supported
-
-- **PDF**: Extracts and previews tables using Azure Document Intelligence (Form Recognizer) if configured, with fallback to legacy OCR if needed. If no tables or text are found, a message is shown.
-- **Images**: Table extraction using Azure Document Intelligence (Form Recognizer) if configured, with fallback to OCR for tabular/summary data
-- **CSV**: Loads and displays as-is
+MIT
 - **Excel (.xlsx, .xls)**: Loads all sheets, allows sheet selection
 - **JSON**: Loads and displays as a table
 
