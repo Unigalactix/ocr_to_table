@@ -1,7 +1,0 @@
-pytesseract
-Pillow
-streamlit
-pandas
-python-dotenv
-azure-storage-blob
-pdfplumber
