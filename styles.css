@@ -1,0 +1,36 @@
+/* Table styling for better presentation */
+.styled-table {
+    border-collapse: collapse;
+    margin: 25px 0;
+    font-size: 0.9em;
+    font-family: sans-serif;
+    min-width: 400px;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.15);
+}
+
+.styled-table th {
+    background-color: #4CAF50;
+    color: white;
+    text-align: center;
+    padding: 12px 15px;
+}
+
+.styled-table td {
+    padding: 12px 15px;
+    text-align: left;
+    border: 1px solid #dddddd;
+}
+
+.styled-table tr:nth-child(even) {
+    background-color: #f2f2f2;
+}
+
+.styled-table tr:nth-child(odd) {
+    background-color: #ffffff;
+}
+
+/* Budget-related row highlighting */
+.budget-row {
+    background-color: #fff3cd !important;
+    border-left: 4px solid #ffc107;
+}

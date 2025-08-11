@@ -1,22 +1,35 @@
-# Document Layout Analyzer
+# Budget Table Extractor
 
-Extract tables and key-value pairs from documents using Azure Document Intelligence Layout Analysis. A clean, focused tool for structured data extraction from PDFs and images.
+A modular Streamlit application that extracts tables from documents using Azure Document Intelligence, with a focus on budget and financial data extraction.
 
 ## Features
-- **Azure Document Intelligence Layout Analysis**: Pure layout-based extraction without prebuilt models
-- **Multiple File Sources**: Azure Blob Storage or local file upload
-- **Table Extraction**: Automatically detects and extracts all tables from documents
-- **Smart Table Merging**: Intelligently combines tables with similar structures
-- **Key-Value Pairs**: Extracts form fields and their values with confidence scores
-- **Clean Data Display**: Organized presentation of extracted data
-- **Export Options**: Download results as CSV or JSON formats
-- **Real-time Progress**: Sidebar progress tracking during analysis
 
-## What It Extracts
-- **Tables**: Structured table data with rows and columns
-- **Key-Value Pairs**: Field names and their corresponding values (with confidence scores)
-- **Form Data**: Automatically detected form fields and values
-- **Multi-page Support**: Processes all pages and can merge related tables
+- **Modular Architecture**: Clean separation of concerns with dedicated modules
+- **Multiple File Sources**: Support for Azure Blob Storage and local file uploads
+- **Document Processing**: Extract tables from PDFs and images using Azure Document Intelligence
+- **Budget Focus**: Automatically identifies and prioritizes budget-related tables
+- **Consolidated Output**: Merges all tables into a single consolidated view
+- **Multiple Formats**: Support for PDF, images, CSV, and Excel files
+- **Clean UI**: Minimal, emoji-free interface focused on functionality
+
+## Project Structure
+
+```
+ocr_to_table/
+├── main.py                 # Main application entry point (minimal)
+├── config.py              # Azure configuration management
+├── table_extractor.py     # Core table extraction logic
+├── ui_handler.py          # Streamlit UI components
+├── styles.css             # Optional CSS styling
+├── utils/                 # Utility modules
+│   ├── __init__.py
+│   ├── currency_utils.py  # Budget/currency detection logic
+│   ├── blob_manager.py    # Azure Blob Storage operations
+│   └── file_utils.py      # File processing utilities
+├── requirements.txt       # Python dependencies
+├── .env                   # Environment variables (create from .env.example)
+└── README.md
+```
 
 ## Setup
 1. Clone this repository or copy the files to your workspace.

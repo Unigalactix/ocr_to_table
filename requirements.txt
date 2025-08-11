@@ -1,5 +1,6 @@
 streamlit
 pandas
 python-dotenv
-azure-storage-blob
 azure-ai-formrecognizer
+azure-storage-blob
+azure-core
