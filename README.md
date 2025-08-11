@@ -1,141 +1,65 @@
-# Azure Blob OCR Data Viewer
+# Document Layout Analyzer
 
-Easily extract, view, and download tabular data from files stored in Azure Blob Storage or uploaded locally. Designed for invoices, receipts, and similar documents. Supports PDF, images, CSV, Excel, and JSON files.
-
----
-- **Download error log** for troubleshooting
-- **Session state** remembers last selections
-- **Help/documentation link** in sidebar
-- **OCR language selection** (multi-language OCR support, legacy fallback)
-- Smart extraction: Only meaningful items/services and totals are shown; address/city/symbol-only labels are ignored
-- Subtotal and Total always shown at the bottom
-- Download extracted table as CSV or JSON (always available for every table)
-
----
-
-   ```
-2. Install dependencies:
-   ```sh
-   pip install -r requirements.txt
-   ```
-3. Add your Azure Blob credentials to `.env`:
-   ```env
-   AZURE_BLOB_CONNECTION_STRING=your_connection_string_here
-   AZURE_BLOB_KEY=your_key_here
-   ```
-4. (Optional) Add storage account info to `tbudgetdb.json` for default container/account info
-
----
-
-## Usage
-
-1. Run the app:
-   ```sh
-
-# Budget Extractor (OCR to Table)
-
-This Streamlit app extracts tables and budget/total/amount fields from documents (PDFs, images, Excel, CSV, JSON) stored in Azure Blob Storage using Azure Document Intelligence. It provides a user-friendly UI for file selection, analysis, and table download.
+Extract tables and key-value pairs from documents using Azure Document Intelligence Layout Analysis. A clean, focused tool for structured data extraction from PDFs and images.
 
 ## Features
+- **Azure Document Intelligence Layout Analysis**: Pure layout-based extraction without prebuilt models
+- **Multiple File Sources**: Azure Blob Storage or local file upload
+- **Table Extraction**: Automatically detects and extracts all tables from documents
+- **Smart Table Merging**: Intelligently combines tables with similar structures
+- **Key-Value Pairs**: Extracts form fields and their values with confidence scores
+- **Clean Data Display**: Organized presentation of extracted data
+- **Export Options**: Download results as CSV or JSON formats
+- **Real-time Progress**: Sidebar progress tracking during analysis
 
-- List files in Azure Blob Storage (main folder only)
-- Select a file from the sidebar
-- Click "RUN" to analyze the selected file
-- For PDFs/images: runs Document Intelligence layout and prebuilt model analysis
-- Extracts and displays only budget/total/amount fields from OCR and prebuilt models
-- Shows detected tables and allows download as JSON
-- For Excel, CSV, JSON: displays data directly
+## What It Extracts
+- **Tables**: Structured table data with rows and columns
+- **Key-Value Pairs**: Field names and their corresponding values (with confidence scores)
+- **Form Data**: Automatically detected form fields and values
+- **Multi-page Support**: Processes all pages and can merge related tables
 
 ## Setup
-
-1. Clone the repository
+1. Clone this repository or copy the files to your workspace.
 2. Install dependencies:
-   ```bash
+   ```sh
    pip install -r requirements.txt
    ```
-3. Create a `.env` file with the following keys:
-   ```env
-   AZURE_BLOB_CONNECTION_STRING=your_blob_connection_string
-   AZURE_BLOB_KEY=your_blob_key (optional, if not using connection string)
-   AZURE_BLOB_CONTAINER=your_container_name
-   AZURE_FORMRECOGNIZER_ENDPOINT=your_form_recognizer_endpoint
-   AZURE_FORMRECOGNIZER_KEY=your_form_recognizer_key
+3. Add your Azure credentials to `.env`:
    ```
-4. Run the app:
-   ```bash
-   streamlit run app.py
+   AZURE_BLOB_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=...
+   AZURE_BLOB_KEY=your-blob-storage-key
+   AZURE_BLOB_CONTAINER=your-container-name
+   AZURE_FORMRECOGNIZER_ENDPOINT=https://your-resource.cognitiveservices.azure.com/
+   AZURE_FORMRECOGNIZER_KEY=your-document-intelligence-key
    ```
 
 ## Usage
+1. Run the app:
+   ```sh
+   streamlit run app.py
+   ```
+2. Choose your file source (Azure Blob Storage or Local Upload)
+3. Select a file from the dropdown or upload a local file
+4. Click **🔍 Analyze Document** to start layout analysis
+5. View extracted tables and key-value pairs
+6. Download results as CSV or JSON if needed
 
-1. Select a file from the sidebar dropdown
-2. Click the "RUN" button
-3. For PDFs/images:
-   - Extracted budget/total/amount fields are shown
-   - Detected tables are displayed and can be downloaded as JSON
-   - Prebuilt model results for budget/total/amount are shown if found
-4. For Excel, CSV, JSON:
-   - Data is displayed directly
-
-## Notes
-
-- Only files in the main folder of the container are listed
-- Only budget/total/amount fields are extracted from OCR and prebuilt models
-- Download buttons are provided for detected tables
-
-## License
-
-MIT
-- **Excel (.xlsx, .xls)**: Loads all sheets, allows sheet selection
-- **JSON**: Loads and displays as a table
-
----
-
-## Notes
-
-- Only meaningful items/services and totals are shown; address/city/symbol-only labels are ignored
-- Works best with invoices, receipts, and similar structured documents
-- For best OCR results, ensure Tesseract is installed and available in your system path
-- For large files, async/background processing is recommended (see sidebar note)
-- The UI is mobile-friendly and includes accessibility improvements for screen readers and keyboard navigation
-
----
-
+## Supported Formats
+- **PDF** files
+- **Images**: PNG, JPG, JPEG, BMP, TIFF
 ## Dependencies
-
-All dependencies are listed in `requirements.txt`:
-
 - streamlit
 - pandas
 - python-dotenv
 - azure-storage-blob
-- pytesseract
-- Pillow
-- pdfplumber
-- openpyxl
-- streamlit-extras
-- opencv-python
-- azure-ai-documentintelligence
+- azure-ai-formrecognizer
 
----
-
-## Security & .env
-
-- **.env** is used for secrets and is ignored by git (see `.gitignore`). Never commit your credentials.
-- Example:
-  ```env
-  # Azure Blob Storage
-  AZURE_BLOB_CONNECTION_STRING=your_connection_string_here
-  AZURE_BLOB_KEY=your_key_here
-
-  # Azure Document Intelligence (Form Recognizer)
-  AZURE_DOCUMENT_INTELLIGENCE_KEY=your_document_intelligence_key
-  AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://your-resource-name.cognitiveservices.azure.com/
-  AZURE_DOCUMENT_INTELLIGENCE_MODEL_ID=your_model_id
-  ```
-
----
+## How It Works
+- Uses Azure Document Intelligence **Layout Analysis** only
+- No prebuilt models required - pure layout-based extraction
+- Automatically detects table structures and form fields
+- Provides confidence scores for key-value pairs
+- Works best with structured documents (invoices, forms, reports)
 
 ## License
-
-MIT License
+MIT

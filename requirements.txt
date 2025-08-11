@@ -3,4 +3,3 @@ pandas
 python-dotenv
 azure-storage-blob
 azure-ai-formrecognizer
-openpyxl
